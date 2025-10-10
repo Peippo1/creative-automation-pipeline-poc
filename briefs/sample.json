@@ -1,0 +1,17 @@
+{
+  "campaign_id": "SPRING24-UK-001",
+  "campaign_name": "Spring Refresh",
+  "products": [
+    {"sku": "ECOCLEAN-1L", "name": "EcoClean Detergent"},
+    {"sku": "FRESH-AIR", "name": "FreshHome Air Spray"}
+  ],
+  "target_market": "UK",
+  "audience": "Eco-conscious families",
+  "message": "Make your home greener this Spring!",
+  "languages": ["en-GB", "de-DE"],
+  "requirements": { "aspect_ratios": ["1:1", "9:16", "16:9"] },
+  "brand": {
+    "primary_colour": "#2E8B57",
+    "logo_path": "assets/brand/logo.png"
+  }
+}

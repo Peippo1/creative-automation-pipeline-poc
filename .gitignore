@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+.venv/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# macOS
+.DS_Store
+
+# VSCode / IDE
+.vscode/
+.idea/
+
+# Environment and credentials
+.env
+.env.*
+!.env.example
+
+# Logs and outputs
+logs/
+outputs/
+manifests/
+*.log
+
+# Jupyter / notebooks
+.ipynb_checkpoints/
+
+# Misc
+*.swp
+*.swo
