@@ -34,7 +34,7 @@ python main.py --brief briefs/sample.json --outdir demo_outputs --force-regenera
 
 ---
 
-## 🧩 Architecture Overview
+## Architecture Overview
 
 The Creative Automation Pipeline is a modular proof-of-concept that mimics a real-world
 creative generation system. It ingests structured campaign briefs, validates them,
@@ -47,7 +47,7 @@ then overlays campaign messaging and brand elements.
 
 ---
 
-## 🏗️ System Components
+## System Components
 
 | Layer | Purpose | Key Decisions |
 |-------|----------|----------------|
@@ -62,7 +62,7 @@ then overlays campaign messaging and brand elements.
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 ```text
 creative-automation-pipeline-poc/
 │
@@ -76,7 +76,7 @@ creative-automation-pipeline-poc/
 
 ---
 
-## 🧮 Data Flow
+## Data Flow
 
 1. Load and validate campaign brief.  
 2. Discover existing assets; reuse if available.  
@@ -87,7 +87,7 @@ creative-automation-pipeline-poc/
 
 ---
 
-## ⚙️ Design Decisions & Rationale
+## Design Decisions & Rationale
 
 | Decision | Rationale |
 |-----------|------------|
@@ -101,7 +101,7 @@ creative-automation-pipeline-poc/
 
 ---
 
-## 🔍 Evaluation Highlights
+## Evaluation Highlights
 
 | Adobe Evaluation Theme | Evidence in This Build |
 |--------------------------|------------------------|
@@ -113,7 +113,7 @@ creative-automation-pipeline-poc/
 
 ---
 
-## 🚀 Future Extensions
+## Future Extensions
 
 - Integrate with **Adobe Firefly** for on-brand AI image generation.  
 - Replace local folders with **Adobe Experience Manager (AEM)** or S3 storage.  
@@ -123,13 +123,13 @@ creative-automation-pipeline-poc/
 
 ---
 
-## 📤 Outputs & Manifests
+## Outputs & Manifests
 
 - Creatives: `outputs/<campaign_id>/<sku>/<aspect>/ad_<locale>_001.jpg`
 - Manifest: `manifests/<campaign_id>_run_001.json` (contains sources, compliance flags, counts)
 - Logs: `logs/<campaign_id>.log` (optional)
 
-## 🧱 Assumptions & Limitations
+## Assumptions & Limitations
 
 - English copy only for the POC; localisation can be added later.
 - Placeholder generator used if no image API key is set.
@@ -144,11 +144,11 @@ creative-automation-pipeline-poc/
 
 ---
 
-## 🧾 Task 2: Proof of Concept Summary
+## Task 2: Proof of Concept Summary
 
 This proof of concept demonstrates a **Creative Automation Pipeline** for scalable ad creative generation, aligned with Adobe’s Forward Deployed Engineer brief.
 
-### 🎯 Objectives Met
+### Objectives Met
 - **Automated creative generation:** Generates and composes ad creatives in 1:1, 9:16, and 16:9 formats.  
 - **Smart asset reuse:** Detects existing heroes to optimise time and resources.  
 - **Localised campaigns:** Demonstrates multi-language support using external JSON message files.  
@@ -156,23 +156,23 @@ This proof of concept demonstrates a **Creative Automation Pipeline** for scalab
 - **Manifest-driven reporting:** Records metadata for each creative, enabling future analytics and governance.  
 - **Optional flags:** Allows reviewers to test regeneration and output paths via `--force-regenerate` and `--outdir`.
 
-### 💡 Highlights
+### Highlights
 - Modular design with **Typer**, **Pydantic**, **Pillow**, and **Structlog**.
 - End-to-end automation from brief → creative → manifest.
 - Built to mirror a production-ready architecture (Firefly + AEM integration ready).
 
 ---
 
-## ▶️ Quickstart Guide
+## Quickstart Guide
 
 ```bash
-# 1️⃣ Create and activate environment
+# Create and activate environment
 python3 -m venv .venv && source .venv/bin/activate
 
-# 2️⃣ Install dependencies
+# Install dependencies
 pip install -r requirements.txt
 
-# 3️⃣ Copy environment example (if using real API key)
+# Copy environment example (if using real API key)
 cp .env.example .env
 ```
 
@@ -212,7 +212,7 @@ python main.py --brief briefs/sample.json
 
 ---
 
-## 🖼️ Viewing Outputs
+## Viewing Outputs
 
 Once the pipeline completes, your generated assets can be found under:
 
@@ -240,11 +240,28 @@ You can open it in any text editor or JSON viewer to see:
 
 ---
 
-## 🧭 How to Evaluate This Build
+```
+
+## 📸 Output Gallery
+
+Below are examples of generated creative outputs from the Proof of Concept pipeline.  
+To keep the repo light, commit just 1–2 representative JPGs under `docs/gallery/`.
+
+### 1️⃣ Localised Creative Output (German)
+*Automated asset generation with multilingual text placement.*
+
+![Localized Creative - German](docs/gallery/creative_de-DE_9x16.jpg)
+
+### 2️⃣ English Campaign Output
+*Base campaign asset generated for the English (UK) locale, 9:16 ratio.*
+
+![English Creative - 9x16](docs/gallery/creative_en-GB_9x16.jpg)
+
+## How to Evaluate This Build
 
 This project has been structured to make evaluation simple and transparent. The following steps help reviewers verify technical design, creative automation, and alignment with Adobe’s ecosystem.
 
-### 🧩 1. Run the Proof of Concept
+### 1. Run the Proof of Concept
 ```bash
 python main.py --brief briefs/sample.json
 ```
@@ -254,30 +271,30 @@ Check the logs for:
 - Localisation line showing active locales (e.g., `en-GB, de-DE`)
 - Manifest and output confirmation lines
 
-### 🖼️ 2. Inspect the Generated Creatives
+### 2. Inspect the Generated Creatives
 Browse the `/outputs` folder:
 - Each SKU (e.g. `ECOCLEAN-1L`, `FRESH-AIR`) should have 3 subfolders: `1x1`, `9x16`, `16x9`.
 - Each contains creatives with campaign message and brand logo overlays.
 - Check that reuse vs. generation is consistent with the terminal logs.
 
-### 📄 3. Validate the Manifest
+### 3. Validate the Manifest
 Open the manifest file in `/manifests`:
 - Confirm accurate metadata (aspect ratios, locales, compliance results).
 - Verify `source` field correctly shows `genai` or `existing`.
 
-### 🧠 4. Assess the Architecture
+### 4. Assess the Architecture
 In `src/services/`:
 - Note modular separation between generation, composition, checks, and storage.
 - Observe comments and logging that explain design intent.
 
-### 💬 5. Review for Adobe Alignment
+### 5. Review for Adobe Alignment
 - Mentions of **Adobe Firefly** and **Adobe Experience Manager (AEM)** in the README show architectural foresight.
 - Localisation and compliance features reflect scalable, enterprise-ready design.
 - Logging and manifesting mimic production creative-ops pipelines.
 
-> 💡 **Tip:** Reviewers can run multiple briefs or change locales to test flexibility. The deterministic outputs and clean manifest structure make validation easy.
+> **Tip:** Reviewers can run multiple briefs or change locales to test flexibility. The deterministic outputs and clean manifest structure make validation easy.
 
-## 🔒 Branch Management
+## Branch Management
 
 This project uses a protected `main` branch to ensure stability.
 
@@ -288,3 +305,24 @@ This project uses a protected `main` branch to ensure stability.
 - Optional status checks may be added later.
 
 Developers can freely create feature branches (e.g. `feature/localisation`) and open pull requests for review before merging into `main`.
+
+## Version Control & Branch Workflow
+
+To ensure clean collaboration and maintain high code quality, the project uses a **feature-branch workflow** with protected branches:
+
+- **`main`** – the production-ready branch; direct commits are blocked.  
+- **Feature branches** – new functionality and fixes are developed in `feature/<name>` branches.  
+- **Pull Requests (PRs)** – all changes are merged into `main` via reviewed PRs.  
+- **Branch Protection Rules** – prevent force-pushes and require at least one review before merge, enforcing good DevOps practice even for solo development.
+
+Example flow:
+```bash
+# Create a new branch
+git checkout -b feature/update-readme
+
+# Commit changes
+git add .
+git commit -m "Docs: Updated README with workflow section"
+
+# Push branch and open PR
+git push -u origin feature/update-readme
