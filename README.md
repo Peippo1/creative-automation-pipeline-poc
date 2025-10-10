@@ -326,3 +326,9 @@ git commit -m "Docs: Updated README with workflow section"
 
 # Push branch and open PR
 git push -u origin feature/update-readme
+
+
+## License
+This project is provided for evaluation and portfolio purposes only.  
+No part of this repository may be used or redistributed without explicit permission.
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
