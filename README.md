@@ -324,5 +324,3 @@ git checkout -b feature/update-readme
 git add .
 git commit -m "Docs: Updated README with workflow section"
 
-# Push branch and open PR
-git push -u origin feature/update-readme
