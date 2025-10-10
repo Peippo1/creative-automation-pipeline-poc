@@ -277,3 +277,14 @@ In `src/services/`:
 
 > 💡 **Tip:** Reviewers can run multiple briefs or change locales to test flexibility. The deterministic outputs and clean manifest structure make validation easy.
 
+## 🔒 Branch Management
+
+This project uses a protected `main` branch to ensure stability.
+
+**Rules applied:**
+- Pull requests required before merging.
+- Linear commit history enforced.
+- Force pushes and deletions disabled.
+- Optional status checks may be added later.
+
+Developers can freely create feature branches (e.g. `feature/localisation`) and open pull requests for review before merging into `main`.
