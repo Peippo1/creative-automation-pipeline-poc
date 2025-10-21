@@ -47,3 +47,4 @@ manifests/
 # Misc
 *.swp
 *.swo
+assets/sessions/

@@ -2,6 +2,7 @@ from pathlib import Path
 from os import getenv
 from base64 import b64decode
 from PIL import Image, ImageDraw, ImageFont
+from typing import Optional
 
 """
 Image generation service.
@@ -49,27 +50,31 @@ def _placeholder(hero_text: str, out_path: Path):
     # Return the output path for downstream usage
     return out_path
 
-def generate_hero(product_name: str, audience: str, market: str, out_path: Path):
+def generate_hero(
+    product_name: str,
+    audience: str,
+    market: str,
+    out_path: Path,
+    prompt: Optional[str] = None,
+    size: str = "1024x1024",
+) -> Path:
     """
     Attempts to generate a hero image using OpenAI Images (gpt-image-1) model.
 
-    The function first checks for the presence of the OPENAI_API_KEY environment variable.
-    If the key is not configured, it immediately falls back to generating a local placeholder image.
-
-    When the key is present, it constructs a detailed prompt designed to instruct the model to produce
-    a studio-quality product hero image tailored for the specified audience and market. The prompt emphasises
-    natural lighting, a clean background, and brand-safe content without text or logos to ensure suitability.
-
-    The OpenAI client is lazily imported to avoid hard dependencies when the API is not used.
-
-    In case of any exceptions during the API call or image processing (e.g., network issues, API errors),
-    the function falls back to the local placeholder to maintain pipeline robustness.
+    Behaviour:
+    - If OPENAI_API_KEY is not present, fall back to a local placeholder.
+    - If `prompt` is provided, it will be used verbatim for image generation.
+    - If `prompt` is not provided, a brand-safe template prompt is constructed from
+      `product_name`, `audience`, and `market`.
+    - The `size` parameter (default "1024x1024") is forwarded to the image API.
 
     Args:
         product_name (str): Name of the product to feature in the hero image.
         audience (str): Target audience descriptor.
         market (str): Market context for the image.
         out_path (Path): Filesystem path where the generated image should be saved.
+        prompt (Optional[str]): Optional explicit prompt supplied by a UI or caller.
+        size (str): Target size for generation (e.g., "1024x1024", "1792x1024").
 
     Returns:
         Path: The path to the generated (or placeholder) image.
@@ -81,8 +86,8 @@ def generate_hero(product_name: str, audience: str, market: str, out_path: Path)
         # API key is not configured; use the offline placeholder image to ensure deterministic output
         return _placeholder(product_name, out_path)
 
-    # Construct a prompt that guides the AI to generate a high-quality, brand-safe hero image
-    prompt = (
+    final_prompt = (
+        prompt.strip() if prompt else
         f"Studio-quality product hero image of '{product_name}' targeted to {audience} "
         f"in market {market}. Natural lighting, clean background, subtle lifestyle context. "
         "Brand-safe, family-friendly, high contrast focal point, minimal clutter. "
@@ -99,8 +104,8 @@ def generate_hero(product_name: str, audience: str, market: str, out_path: Path)
         # Send a request to generate an image with the specified model, prompt, and size
         resp = client.images.generate(
             model="gpt-image-1",
-            prompt=prompt,
-            size="1024x1024"
+            prompt=final_prompt,
+            size=size
         )
 
         # Extract the base64-encoded image data from the response
@@ -122,4 +127,6 @@ def generate_hero(product_name: str, audience: str, market: str, out_path: Path)
     except Exception:
         # Catch all exceptions (network errors, API failures, decoding issues) and fall back gracefully
         # This ensures the pipeline remains robust and deterministic by providing a placeholder image
-        return _placeholder(product_name, out_path)
+        # If a custom prompt was supplied, try to include a short cue on the placeholder
+        placeholder_text = (prompt[:50] + "…") if prompt else product_name
+        return _placeholder(placeholder_text, out_path)

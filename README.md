@@ -1,5 +1,7 @@
 # Creative Automation Pipeline (POC)
 
+[![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/) [![FastAPI](https://img.shields.io/badge/FastAPI-%F0%9F%9A%80-009688.svg)](https://fastapi.tiangolo.com/) [![Streamlit](https://img.shields.io/badge/Streamlit-UI-FF4B4B.svg)](https://streamlit.io/)
+
 A local proof-of-concept that ingests a campaign brief, reuses or generates hero images,
 creates 1:1, 9:16 and 16:9 variants with message + logo, and writes a manifest.
 
@@ -31,6 +33,80 @@ python main.py --brief briefs/sample.json
 python main.py --brief briefs/sample.json --outdir demo_outputs --force-regenerate
 ```
 
+## One‑Command Demo Script (optional)
+
+For macOS/Linux reviewers who want a *single command* demo, save this script and run it.
+
+**Create the script:**
+```bash
+mkdir -p scripts
+cat > scripts/demo.sh << 'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Resolve repo root and enter it
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
+cd "$repo_root"
+
+echo "[1/5] Creating venv & installing deps..."
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+echo "[2/5] Preparing environment..."
+[ -f .env ] || cp .env.example .env
+# Uncomment and add a key for real generations
+# echo 'OPENAI_API_KEY=sk-...' >> .env
+
+echo "[3/5] Running pipeline with sample brief..."
+python main.py --brief briefs/sample.json
+
+echo "[4/5] Locating a sample output..."
+latest_img=$(ls -t outputs/*/*/9x16/ad_en-GB_001.jpg 2>/dev/null | head -n1 || true)
+
+echo "[5/5] Opening the output (if possible)..."
+if [[ -n "${latest_img}" ]]; then
+  if command -v open >/dev/null 2>&1; then
+    open "${latest_img}"          # macOS
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "${latest_img}"      # Linux
+  else
+    echo "Output ready at: ${latest_img}"
+  fi
+else
+  echo "No output found. Check 'outputs/' and logs above."
+fi
+EOF
+chmod +x scripts/demo.sh
+```
+
+**Run it:**
+```bash
+./scripts/demo.sh
+```
+
+This script bootstraps a venv, installs dependencies, runs the pipeline on the sample brief, and opens a generated creative (falls back to printing the path if GUI open is unavailable).
+
+## Reviewer Walkthrough (2 minutes)
+
+If you're short on time, follow these steps to verify the build quickly:
+
+1) **Run the CLI once**
+   ```bash
+   python main.py --brief briefs/sample.json
+   ```
+   - Watch the logs for: brief loaded, hero reuse/generation, locales, output & manifest paths.
+
+2) **Open the outputs & manifest**
+   - Creatives appear under `outputs/<campaign_id>/<sku>/<ratio>/ad_<locale>_001.jpg`.
+   - The manifest is written to `manifests/<campaign_id>_run_001.json`.
+
+3) **(Optional) Try the UI**
+   - Start API: `uvicorn api.app:app --reload` (with `API_TOKEN` set).
+   - Start UI: `streamlit run ui/app.py` (with `API_URL` + `API_TOKEN`).
+   - Enter a prompt, pick ratios/locales, upload a logo → generate and download ZIP.
+
+That’s it — you’ve seen the full path from brief → generation → review.
 
 ---
 
@@ -68,11 +144,24 @@ creative-automation-pipeline-poc/
 │
 ├── assets/          # Input & reusable media
 ├── briefs/          # JSON campaign briefs
-├── outputs/         # Generated creatives
+├── outputs/
+│   └── SPRING24-UK-001/  # generated creatives (truncated)
+│       └── ...
 ├── manifests/       # Run metadata & logs
 ├── src/             # Source code (models, services, utils)
 └── main.py          # CLI orchestrator
 ```
+
+### Folder Legend
+- **[api/](api/)** — FastAPI gateway exposing `/generate` and `/download` routes
+- **[assets/](assets/)** — reusable brand, localisation, and product heroes
+- **[briefs/](briefs/)** — campaign brief JSON inputs
+- **[docs/gallery/](docs/gallery/)** — lightweight sample outputs for reviewers
+- **[manifests/](manifests/)** — JSON run manifests for traceability
+- **[outputs/](outputs/)** — generated creatives (per campaign/SKU/ratio)
+- **[src/](src/)** — core pipeline logic (models, services, utils)
+- **[ui/](ui/)** — optional Streamlit user interface
+- **[main.py](main.py)** — CLI entrypoint for local execution
 
 ---
 
@@ -240,7 +329,128 @@ You can open it in any text editor or JSON viewer to see:
 
 ---
 
+## Architecture Diagram (High-Level)
 ```
++------------------+
+|  Brief (JSON)    |
++--------+---------+
+         |
+         v
++------------------+
+|  CLI / API / UI  |
++--------+---------+
+         |
+         v
++------------------+
+|   Pipeline Core  |
+| (services/*)     |
+|  ├ generator     |
+|  ├ composer      |
+|  ├ checks        |
+|  └ storage       |
++--------+---------+
+         |
+         v
++------------------+
+|  Outputs & Logs  |
+|  creatives/      |
+|  manifests/      |
++--------+---------+
+         |
+         v
++------------------------------+
+|   (Future) Firefly + AEM     |
++------------------------------+
+```
+---
+
+## FastAPI + UI Flow (at a glance)
+
+```text
+[ Browser UI (Streamlit) ]
+          |
+          v
+   POST /generate        (X-API-Key, per-IP rate limit)
+          |
+          v
+      FastAPI
+          |
+          v
+   services/generator  ->  hero (AI or placeholder)
+          |
+          v
+   services/composer   ->  overlays (brand bar, message, logo)
+          |
+          v
+   services/checks     ->  logo present? legal terms?
+          |
+          v
+   outputs/ + manifests/ + ZIP download (/download/{session})
+```
+
+This complements the high-level architecture and shows the optional API-enabled path for interactive demos.
+
+
+### OpenAI for POC, Firefly for Production
+
+For the POC
+	•	Immediate key access enabled rapid iteration without enterprise provisioning delay
+	•	Keeps focus on the architecture, not account provisioning
+	•	Placeholder fallback allows the demo to run fully offline
+
+For production
+	•	Firefly provides brand-safe presets and style consistency
+	•	Integrates with AEM for approvals, versioning and governance
+	•	C2PA support and enterprise controls align with real creative ops
+
+Only the generator service would be swapped — the orchestration, composer, checks,
+storage and manifest layers remain the same.
+
+---
+
+## 🖥️ Optional UI (Streamlit)
+
+A simple Streamlit app can be launched to provide a minimal UI for uploading briefs,
+triggering generation, and previewing outputs.
+Enables non-technical stakeholders to generate creatives interactively without using the CLI.
+
+```bash
+streamlit run ui/app.py
+```
+
+## 🌐 FastAPI Gateway (Optional)
+
+A lightweight API layer exposes the generation pipeline over HTTP for UI or external callers.
+
+### Run the API
+
+```bash
+export API_TOKEN=dev-token
+uvicorn api.app:app --reload
+```
+
+### Example request
+
+```bash
+curl -X POST http://127.0.0.1:8000/generate \
+  -H "X-API-Key: dev-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "minimalist eco cleaner bottle on marble counter, daylight",
+    "message": "Make your home greener",
+    "locales": ["en-GB"],
+    "ratios": ["1:1","9:16"],
+    "brand_colour": "#0A84FF"
+  }'
+```
+
+### Notes
+- Basic auth via `X-API-Key`
+- Per‑IP rate limiting enabled
+- `/download/{session_id}` returns ZIP of all variants
+- Designed to be swapped to Adobe Firefly + AEM in production
+
+---
 
 ## 📸 Output Gallery
 
@@ -326,7 +536,51 @@ git commit -m "Docs: Updated README with workflow section"
 
 # Push branch and open PR
 git push -u origin feature/update-readme
+```
 
+
+## Security & Abuse Prevention
+
+This POC includes several safeguards to prevent accidental or malicious over‑use:
+
+- **Prompt safety filtering** — basic term‑block list and max prompt length.
+- **Variant cap per request** — limits locales×ratios to prevent burst usage.
+- **UI rate limit (per session)** — throttles repeated clicks client‑side.
+- **API rate limit (per IP)** — window‑based limiter in FastAPI gateway.
+- **API key auth (`X‑API‑Key`)** — required for all API calls.
+- **Graceful fallbacks** — placeholder generation if external API is missing/unavailable.
+
+In a hardened environment this would be extended with:
+- JWT / OAuth2 and per‑user quotas
+- Audit logging and cost metering per run
+- Server‑side moderation and policy enforcement
+- Network‑level throttling and WAF rules
+
+---
+
+## Production Hardening Roadmap
+
+If taken beyond POC, the next steps would include:
+
+1) **Replace placeholder/OpenAI with Adobe Firefly**
+   - On‑brand presets, enterprise licensing, C2PA credentials.
+
+2) **Move assets & manifests into AEM / S3**
+   - Versioning, approvals, lifecycle, signed URLs.
+
+3) **Make the pipeline asynchronous**
+   - Queue workers, retries, and SLA tracking (Celery/Temporal).
+
+4) **Add authentication and RBAC**
+   - OAuth2 / enterprise IdP integration with role‑based actions.
+
+5) **Expose review & approval UI**
+   - Preview grid, accept/reject, regenerate with comments.
+
+6) **Telemetry & cost visibility**
+   - Metrics for throughput, reuse‑rate, variant coverage and spend.
+
+These steps map cleanly onto the current abstractions without redesign.
 
 ## License
 This project is provided for evaluation and portfolio purposes only.  
