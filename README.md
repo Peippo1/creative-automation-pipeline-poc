@@ -451,6 +451,7 @@ curl -X POST http://127.0.0.1:8000/generate \
 - Designed to be swapped to Adobe Firefly + AEM in production
 
 ---
+```
 
 ## 📸 Output Gallery
 
@@ -536,51 +537,7 @@ git commit -m "Docs: Updated README with workflow section"
 
 # Push branch and open PR
 git push -u origin feature/update-readme
-```
 
-
-## Security & Abuse Prevention
-
-This POC includes several safeguards to prevent accidental or malicious over‑use:
-
-- **Prompt safety filtering** — basic term‑block list and max prompt length.
-- **Variant cap per request** — limits locales×ratios to prevent burst usage.
-- **UI rate limit (per session)** — throttles repeated clicks client‑side.
-- **API rate limit (per IP)** — window‑based limiter in FastAPI gateway.
-- **API key auth (`X‑API‑Key`)** — required for all API calls.
-- **Graceful fallbacks** — placeholder generation if external API is missing/unavailable.
-
-In a hardened environment this would be extended with:
-- JWT / OAuth2 and per‑user quotas
-- Audit logging and cost metering per run
-- Server‑side moderation and policy enforcement
-- Network‑level throttling and WAF rules
-
----
-
-## Production Hardening Roadmap
-
-If taken beyond POC, the next steps would include:
-
-1) **Replace placeholder/OpenAI with Adobe Firefly**
-   - On‑brand presets, enterprise licensing, C2PA credentials.
-
-2) **Move assets & manifests into AEM / S3**
-   - Versioning, approvals, lifecycle, signed URLs.
-
-3) **Make the pipeline asynchronous**
-   - Queue workers, retries, and SLA tracking (Celery/Temporal).
-
-4) **Add authentication and RBAC**
-   - OAuth2 / enterprise IdP integration with role‑based actions.
-
-5) **Expose review & approval UI**
-   - Preview grid, accept/reject, regenerate with comments.
-
-6) **Telemetry & cost visibility**
-   - Metrics for throughput, reuse‑rate, variant coverage and spend.
-
-These steps map cleanly onto the current abstractions without redesign.
 
 ## License
 This project is provided for evaluation and portfolio purposes only.  
