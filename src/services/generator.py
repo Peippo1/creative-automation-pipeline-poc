@@ -4,50 +4,66 @@ from base64 import b64decode
 from PIL import Image, ImageDraw, ImageFont
 from typing import Optional
 
-"""
-Image generation service.
+import logging
 
-This module implements a dual-mode generator: it attempts to create images via OpenAI's API,
-but gracefully falls back to a local placeholder image if the API key is missing or any error occurs.
+logger = logging.getLogger("generator")
+MAX_PROMPT = 500  # defensive cap for prompts echoed to model/placeholder
 
-Behaviour:
-- If OPENAI_API_KEY is set, attempt to generate a hero image via OpenAI Images (gpt-image-1).
-- On any failure (no key/network/API error), fall back to a local placeholder hero.
-- Output path is always written so downstream composer can proceed deterministically.
-"""
-
-def _placeholder(hero_text: str, out_path: Path):
+def _wrap_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[str]:
     """
-    Generates a simple placeholder image with the given hero text.
+    Simple word-wrap: returns a list of lines that fit within max_width for the given font.
+    """
+    words = text.split()
+    if not words:
+        return []
+    lines, line = [], ""
+    for w in words:
+        test = (line + " " + w).strip()
+        wpx = draw.textbbox((0, 0), test, font=font)[2]
+        if wpx <= max_width:
+            line = test
+        else:
+            if line:
+                lines.append(line)
+            line = w
+    if line:
+        lines.append(line)
+    return lines
 
-    This function is used as a fallback when the OpenAI image generation is not available.
-    It creates a basic image with a frame and text to ensure the pipeline can continue without interruption.
+def _placeholder(hero_text: str, out_path: Path, bg=(235, 240, 255), fg=(20, 40, 80)):
+    """
+    Generates a simple placeholder image with text, with basic word-wrapping.
     """
     # Ensure the output directory exists to avoid file write errors
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Create a blank RGB image with a light grey background as a neutral placeholder
-    im = Image.new("RGB", (1600, 1200), (245, 245, 245))
+    # Create a blank RGB image
+    width, height = 1600, 1200
+    im = Image.new("RGB", (width, height), bg)
     d = ImageDraw.Draw(im)
 
-    # Draw a simple rectangular frame near the bottom of the image to visually separate the text area
-    d.rectangle((100, 900, 1500, 1100), outline=(0, 0, 0), width=6)
-
     try:
-        # Attempt to load a common TrueType font for better text rendering quality
-        font = ImageFont.truetype("DejaVuSans.ttf", 48)
+        font_title = ImageFont.truetype("DejaVuSans.ttf", 48)
+        font_body = ImageFont.truetype("DejaVuSans.ttf", 30)
     except Exception:
-        # If the TrueType font is unavailable (e.g., environment lacks font files),
-        # fall back to the default PIL bitmap font to ensure text is still rendered
-        font = ImageFont.load_default()
+        font_title = ImageFont.load_default()
+        font_body = ImageFont.load_default()
 
-    # Draw the hero text inside the frame with a dark grey colour for readability
-    d.text((140, 930), hero_text, fill=(20, 20, 20), font=font)
+    # Title
+    title = "Placeholder Hero"
+    t_w, t_h = d.textbbox((0, 0), title, font=font_title)[2:]
+    d.text(((width - t_w) // 2, height // 3 - t_h), title, fill=fg, font=font_title)
 
-    # Save the generated placeholder image to the specified output path
-    im.save(out_path)
+    # Body (wrapped)
+    max_text_width = width - 280  # side margins
+    for i, line in enumerate(_wrap_text(d, hero_text, font_body, max_text_width)[:4]):
+        w, h = d.textbbox((0, 0), line, font=font_body)[2:]
+        y = height // 3 + 20 + i * (h + 8)
+        d.text(((width - w) // 2, y), line, fill=fg, font=font_body)
 
-    # Return the output path for downstream usage
+    # Save explicitly as PNG
+    im.save(out_path, "PNG")
+    logger.info("Wrote placeholder hero to %s", out_path)
     return out_path
 
 def generate_hero(
@@ -79,12 +95,17 @@ def generate_hero(
     Returns:
         Path: The path to the generated (or placeholder) image.
     """
+    # Cap any incoming prompt we might echo to model/placeholder
+    if prompt:
+      prompt = prompt[:MAX_PROMPT]
+
     # Retrieve the OpenAI API key from environment variables to determine if online generation is possible
     api_key = getenv("OPENAI_API_KEY")
 
     if not api_key:
-        # API key is not configured; use the offline placeholder image to ensure deterministic output
-        return _placeholder(product_name, out_path)
+        logger.info("OPENAI_API_KEY not set; using placeholder.")
+        safe_text = (prompt or product_name or "Product")
+        return _placeholder(safe_text, out_path)
 
     final_prompt = (
         prompt.strip() if prompt else
@@ -92,7 +113,7 @@ def generate_hero(
         f"in market {market}. Natural lighting, clean background, subtle lifestyle context. "
         "Brand-safe, family-friendly, high contrast focal point, minimal clutter. "
         "No text, no watermarks, no logos."
-    )
+    )[:MAX_PROMPT]
 
     try:
         # Import the OpenAI client library here to avoid requiring it unless actually used
@@ -124,9 +145,8 @@ def generate_hero(
         # Return the path to the successfully generated image
         return out_path
 
-    except Exception:
-        # Catch all exceptions (network errors, API failures, decoding issues) and fall back gracefully
-        # This ensures the pipeline remains robust and deterministic by providing a placeholder image
-        # If a custom prompt was supplied, try to include a short cue on the placeholder
-        placeholder_text = (prompt[:50] + "…") if prompt else product_name
-        return _placeholder(placeholder_text, out_path)
+    except Exception as e:
+        # Fall back gracefully and log why
+        logger.warning("Model generation failed; using placeholder. Error: %s", e)
+        placeholder_text = (prompt or product_name or "Product")
+        return _placeholder(placeholder_text[:MAX_PROMPT], out_path)

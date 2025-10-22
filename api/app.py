@@ -1,139 +1,129 @@
-# api/app.py
-# FastAPI gateway for the creative pipeline with basic API key auth and per-IP rate limiting.
+from __future__ import annotations
 
-import base64
-import io
 import os
-import time
+import io
+import re
+import uuid
+import base64
 import logging
-from dotenv import load_dotenv
 from pathlib import Path
-from typing import List, Optional, Dict
+from typing import List, Optional
 
-# Load env (e.g., OPENAI_API_KEY, API_TOKEN) and set up logging
-load_dotenv()
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
-logger = logging.getLogger("api")
+from fastapi import FastAPI, HTTPException, Header
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, field_validator
+from zipfile import ZipFile, ZIP_DEFLATED
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
-from starlette.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 
 # Local services
 from src.services import generator, composer, checks
 
-# -----------------------------
-# Config
-# -----------------------------
+# ------------------------------------------------------------
+# Env & logging
+# ------------------------------------------------------------
+load_dotenv()
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+logger = logging.getLogger("api")
+
 API_TOKEN = os.getenv("API_TOKEN", "dev-token")
-RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
-RATE_LIMIT_MAX_REQUESTS = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "20"))
+SESSIONS_DIR = Path("assets/sessions")
+SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
-# simple in-memory IP -> timestamps window
-_rate_window: Dict[str, List[float]] = {}
-
-# -----------------------------
-# App
-# -----------------------------
-app = FastAPI(title="Creative Pipeline API", version="1.0.0")
-
-# CORS for local UI/dev
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# -----------------------------
+# ------------------------------------------------------------
 # Models
-# -----------------------------
+# ------------------------------------------------------------
 class GenerateRequest(BaseModel):
-    prompt: Optional[str] = Field(None, description="Image generation prompt")
-    message: str = Field(..., description="Brand message to render")
-    locales: List[str] = Field(..., description="Locales to render, e.g. ['en-GB']")
-    ratios: List[str] = Field(..., description="Aspect ratios, e.g. ['1:1','9:16','16:9']")
-    brand_colour: str = Field("#0A84FF", description="Hex colour for brand bar")
-    size: str = Field("1024x1024", description="Image generation size")
-    logo_base64: Optional[str] = Field(None, description="PNG logo as base64 (optional)")
+    prompt: Optional[str] = None
+    message: str
+    locales: List[str]
+    ratios: List[str]
+    brand_colour: str = "#0A84FF"
+    size: str = "1024x1024"
+    logo_b64: Optional[str] = None  # optional inline logo
 
+    @field_validator("message")
+    @classmethod
+    def message_not_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("message must not be empty")
+        return v
 
 class OutputItem(BaseModel):
     locale: str
     ratio: str
     path: str
-    preview_b64: Optional[str] = None
+    preview_b64: Optional[str]
     logo_ok: bool
     legal_ok: bool
-
 
 class GenerateResponse(BaseModel):
     session_id: str
     outputs_root: str
     outputs: List[OutputItem]
-    download_route: str
 
+# ------------------------------------------------------------
+# App
+# ------------------------------------------------------------
+app = FastAPI(title="Creative Automation API", version="0.2.0")
 
-# -----------------------------
+# ------------------------------------------------------------
 # Helpers
-# -----------------------------
-def _auth(request: Request):
-    token = request.headers.get("X-API-Key")
-    if token != API_TOKEN:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+# ------------------------------------------------------------
+LOCALE_RE = re.compile(r"^[a-z]{2}-[A-Z]{2}$")  # en-GB, de-DE
+ALLOWED_RATIOS = {"1:1", "9:16", "16:9"}
+MAX_LOCALES = 5
+MAX_RATIOS = 3
 
+def safe_name(s: str, max_len: int = 64) -> str:
+    token = re.sub(r"[^A-Za-z0-9\-_]", "_", s)
+    return token[:max_len]
 
-def _rate_limit(request: Request):
-    ip = request.client.host if request.client else "unknown"
-    now = time.time()
-    window = _rate_window.get(ip, [])
-    # prune old timestamps
-    window = [t for t in window if now - t < RATE_LIMIT_WINDOW_SECONDS]
-    if len(window) >= RATE_LIMIT_MAX_REQUESTS:
-        seconds = int(RATE_LIMIT_WINDOW_SECONDS - (now - window[0]))
-        raise HTTPException(status_code=429, detail=f"Rate limit exceeded. Try again in ~{max(seconds,1)}s.")
-    window.append(now)
-    _rate_window[ip] = window
-
-
-# -----------------------------
+# ------------------------------------------------------------
 # Routes
-# -----------------------------
+# ------------------------------------------------------------
 @app.get("/health")
-def health():
+async def health():
     return {"status": "ok"}
 
-
 @app.post("/generate", response_model=GenerateResponse)
-async def generate_endpoint(payload: GenerateRequest, request: Request):
-    _auth(request)
-    _rate_limit(request)
+async def generate_endpoint(payload: GenerateRequest, x_api_key: str = Header(default="")):
+    # Auth
+    if not API_TOKEN or x_api_key != API_TOKEN:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
-    allowed_ratios = {"1:1", "9:16", "16:9"}
-    if not set(payload.ratios).issubset(allowed_ratios):
-        raise HTTPException(status_code=400, detail="Unsupported ratios requested.")
+    # Validate inputs (defence-in-depth)
+    if len(payload.locales) == 0 or len(payload.ratios) == 0:
+        raise HTTPException(status_code=400, detail="locales and ratios are required")
+    if len(payload.locales) > MAX_LOCALES:
+        raise HTTPException(status_code=400, detail=f"Too many locales (max {MAX_LOCALES})")
+    if len(payload.ratios) > MAX_RATIOS:
+        raise HTTPException(status_code=400, detail=f"Too many ratios (max {MAX_RATIOS})")
+    for loc in payload.locales:
+        if not LOCALE_RE.match(loc):
+            raise HTTPException(status_code=400, detail=f"Invalid locale format: {loc}")
+    for r in payload.ratios:
+        if r not in ALLOWED_RATIOS:
+            raise HTTPException(status_code=400, detail=f"Unsupported ratio: {r}")
 
-    session_id = f"API_SESSION_{int(time.time())}"
-    outputs_root = Path("outputs") / session_id / "AD"
+    # Prepare session folder
+    session_id = f"API_SESSION_{uuid.uuid4().hex[:10]}"
+    outputs_root = SESSIONS_DIR / session_id / "AD"
     outputs_root.mkdir(parents=True, exist_ok=True)
 
-    # Optional logo
+    # Optional: decode logo
     logo_path: Optional[Path] = None
-    if payload.logo_base64:
+    if payload.logo_b64:
         try:
-            raw = base64.b64decode(payload.logo_base64)
-            logo_path = Path("assets") / "logos" / f"api_logo_{session_id}.png"
-            logo_path.parent.mkdir(parents=True, exist_ok=True)
+            raw = base64.b64decode(payload.logo_b64.split(",")[-1])
+            logo_path = outputs_root / "uploaded_logo.png"
             with open(logo_path, "wb") as f:
                 f.write(raw)
         except Exception:
-            raise HTTPException(status_code=400, detail="Invalid base64 logo data.")
+            raise HTTPException(status_code=400, detail="Invalid logo_b64")
 
-    # Generate hero
-    hero_path = Path("assets") / "sessions" / session_id / "hero.png"
-    hero_path.parent.mkdir(parents=True, exist_ok=True)
+    # Generate or reuse hero
+    hero_path = outputs_root / "hero.png"
     try:
         generator.generate_hero(
             product_name="API Product",
@@ -147,31 +137,56 @@ async def generate_endpoint(payload: GenerateRequest, request: Request):
         logger.exception("generate_hero failed")
         raise HTTPException(status_code=500, detail=f"generate_hero failed: {e}")
 
-    # Compose & build previews
+    # Compose variants (Hardened against path-injection)
     items: List[OutputItem] = []
+    resolved_root = outputs_root.resolve()
+
     for loc in payload.locales:
         for ratio in payload.ratios:
-            out_path = outputs_root / ratio.replace(":", "x") / f"ad_{loc}_001.jpg"
+            ratio_token = safe_name(ratio.replace(":", "x"))
+            locale_token = safe_name(loc)
+            filename = f"ad_{locale_token}_{uuid.uuid4().hex[:8]}.jpg"
+            out_path = outputs_root / ratio_token / filename
             out_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Ensure target path is within outputs_root
+            try:
+                resolved_target = out_path.resolve()
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid output path")
+            if not str(resolved_target).startswith(str(resolved_root) + os.sep):
+                logger.warning("Rejected path outside outputs_root: %s", resolved_target)
+                raise HTTPException(status_code=400, detail="Invalid output path requested")
+
+            # Compose and checks
             try:
                 composed = composer.compose_variant(
                     hero_path,
-                    logo_path if logo_path else Path("assets/brand/logo.png"),
+                    out_path,
                     payload.message,
                     payload.brand_colour,
+                    loc,
                     ratio,
-                    out_path,
                 )
                 logo_ok = checks.logo_present(logo_path if logo_path else Path("assets/brand/logo.png"))
                 legal_ok = checks.legal_check(payload.message)
+
+                # Normalize compliance results to booleans (helpers may return "pass"/"fail")
+                logo_ok_bool = (logo_ok is True) or (str(logo_ok).strip().lower() == "pass")
+                legal_ok_bool = (legal_ok is True) or (str(legal_ok).strip().lower() == "pass")
+
             except Exception as e:
                 logger.exception("compose_variant failed")
                 raise HTTPException(status_code=500, detail=f"compose_variant failed: {e}")
 
+            # Preview (best-effort)
             try:
-                with open(composed, "rb") as f:
+                comp_path = Path(composed)
+                with open(comp_path, "rb") as f:
                     b = f.read()
-                preview_b64 = "data:image/jpeg;base64," + base64.b64encode(b).decode("utf-8")
+                ext = comp_path.suffix.lower()
+                mime = "image/png" if ext == ".png" else "image/jpeg"
+                preview_b64 = f"data:{mime};base64," + base64.b64encode(b).decode("utf-8")
             except Exception:
                 preview_b64 = None
 
@@ -181,8 +196,8 @@ async def generate_endpoint(payload: GenerateRequest, request: Request):
                     ratio=ratio,
                     path=str(composed),
                     preview_b64=preview_b64,
-                    logo_ok=logo_ok,
-                    legal_ok=legal_ok,
+                    logo_ok=logo_ok_bool,
+                    legal_ok=legal_ok_bool,
                 )
             )
 
@@ -190,35 +205,25 @@ async def generate_endpoint(payload: GenerateRequest, request: Request):
         session_id=session_id,
         outputs_root=str(outputs_root),
         outputs=items,
-        download_route=f"/download/{session_id}",
     )
 
 
 @app.get("/download/{session_id}")
-def download_zip(session_id: str, request: Request):
-    _auth(request)
-    _rate_limit(request)
+async def download(session_id: str, x_api_key: str = Header(default="")):
+    if not API_TOKEN or x_api_key != API_TOKEN:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
-    root = Path("outputs") / session_id / "AD"
-    if not root.exists():
+    root = (SESSIONS_DIR / session_id).resolve()
+    if not root.exists() or not root.is_dir():
         raise HTTPException(status_code=404, detail="Session not found")
 
-    import zipfile
-    import tempfile
-
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
-    tmp.close()
-
-    with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_DEFLATED) as z:
+    # stream a ZIP
+    mem = io.BytesIO()
+    with ZipFile(mem, mode="w", compression=ZIP_DEFLATED) as zf:
         for p in root.rglob("*"):
             if p.is_file():
-                z.write(p, arcname=str(p.relative_to(root)))
-
-    def iterfile():
-        with open(tmp.name, "rb") as f:
-            yield from f
-        os.remove(tmp.name)
-
-    return StreamingResponse(iterfile(), media_type="application/zip", headers={
-        "Content-Disposition": f'attachment; filename="{session_id}.zip"'
+                zf.write(p, arcname=p.relative_to(root))
+    mem.seek(0)
+    return StreamingResponse(mem, media_type="application/zip", headers={
+        "Content-Disposition": f"attachment; filename={session_id}.zip"
     })
