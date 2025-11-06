@@ -98,11 +98,11 @@ def main(
 
                 composed = composer.compose_variant(
                     hero,
-                    Path(brief_obj.brand.logo_path),
+                    out_path,
                     msg,
                     brief_obj.brand.primary_colour,
+                    locale,
                     ratio,
-                    out_path,
                 )
 
                 comp: Dict = {
