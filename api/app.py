@@ -248,10 +248,13 @@ async def download(session_id: str, x_api_key: str = Header(default="")):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     # Strictly validate session id format and prevent path traversal
-    if not SESSION_ID_RE.match(session_id):
+    match = SESSION_ID_RE.match(session_id)
+    if not match:
         raise HTTPException(status_code=400, detail="Invalid session id")
 
-    root = (SESSIONS_DIR / session_id).resolve()
+    # Reconstruct a clean session_id to eliminate taint
+    safe_session_id = match.group(0)
+    root = (SESSIONS_DIR / safe_session_id).resolve()
     sessions_root = SESSIONS_DIR.resolve()
 
     # Ensure root is inside sessions_root using path semantics
