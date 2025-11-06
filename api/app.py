@@ -26,7 +26,15 @@ load_dotenv()
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger("api")
 
+ENV = os.getenv("ENV", "dev")
 API_TOKEN = os.getenv("API_TOKEN", "dev-token")
+
+if ENV != "dev" and API_TOKEN == "dev-token":
+    raise RuntimeError(
+        "Unsafe API token configuration: API_TOKEN is 'dev-token' but ENV is not 'dev'. "
+        "Set a strong API_TOKEN for non-local usage."
+    )
+
 SESSIONS_DIR = Path("assets/sessions")
 SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -74,6 +82,8 @@ LOCALE_RE = re.compile(r"^[a-z]{2}-[A-Z]{2}$")  # en-GB, de-DE
 ALLOWED_RATIOS = {"1:1", "9:16", "16:9"}
 MAX_LOCALES = 5
 MAX_RATIOS = 3
+MAX_PROMPT_CHARS = 512
+MAX_COMBINATIONS = 12  # locales × ratios
 
 def safe_name(s: str, max_len: int = 64) -> str:
     token = re.sub(r"[^A-Za-z0-9\-_]", "_", s)
@@ -87,7 +97,7 @@ async def health():
     return {"status": "ok"}
 
 @app.post("/generate", response_model=GenerateResponse)
-async def generate_endpoint(payload: GenerateRequest, x_api_key: str = Header(default="")):
+def generate_endpoint(payload: GenerateRequest, x_api_key: str = Header(default="")):
     # Auth
     if not API_TOKEN or x_api_key != API_TOKEN:
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -105,6 +115,20 @@ async def generate_endpoint(payload: GenerateRequest, x_api_key: str = Header(de
     for r in payload.ratios:
         if r not in ALLOWED_RATIOS:
             raise HTTPException(status_code=400, detail=f"Unsupported ratio: {r}")
+
+    # Prompt and combinations limits
+    if payload.prompt and len(payload.prompt) > MAX_PROMPT_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Prompt too long (max {MAX_PROMPT_CHARS} characters).",
+        )
+
+    combos = len(payload.locales) * len(payload.ratios)
+    if combos > MAX_COMBINATIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many variants requested ({combos}); max is {MAX_COMBINATIONS}.",
+        )
 
     # Prepare session folder
     session_id = f"API_SESSION_{uuid.uuid4().hex[:10]}"
@@ -133,9 +157,12 @@ async def generate_endpoint(payload: GenerateRequest, x_api_key: str = Header(de
             prompt=(payload.prompt or None),
             size=payload.size,
         )
-    except Exception as e:
+    except Exception:
         logger.exception("generate_hero failed")
-        raise HTTPException(status_code=500, detail=f"generate_hero failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Image generation failed.",
+        )
 
     # Compose variants (Hardened against path-injection)
     items: List[OutputItem] = []
@@ -175,9 +202,12 @@ async def generate_endpoint(payload: GenerateRequest, x_api_key: str = Header(de
                 logo_ok_bool = (logo_ok is True) or (str(logo_ok).strip().lower() == "pass")
                 legal_ok_bool = (legal_ok is True) or (str(legal_ok).strip().lower() == "pass")
 
-            except Exception as e:
+            except Exception:
                 logger.exception("compose_variant failed")
-                raise HTTPException(status_code=500, detail=f"compose_variant failed: {e}")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to compose the ad image.",
+                )
 
             # Preview (best-effort)
             try:
