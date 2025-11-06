@@ -178,14 +178,16 @@ def generate_endpoint(payload: GenerateRequest, x_api_key: str = Header(default=
             out_path = outputs_root / ratio_folder / filename
             out_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Ensure target path is within outputs_root
+            # Ensure target path is within outputs_root (path semantics)
             try:
                 resolved_target = out_path.resolve()
-            except Exception:
-                raise HTTPException(status_code=400, detail="Invalid output path")
-            if not str(resolved_target).startswith(str(resolved_root) + os.sep):
+                # Raises ValueError if resolved_target is not under resolved_root
+                resolved_target.relative_to(resolved_root)
+            except ValueError:
                 logger.warning("Rejected path outside outputs_root: %s", resolved_target)
                 raise HTTPException(status_code=400, detail="Invalid output path requested")
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid output path")
 
             # Compose and checks
             try:
@@ -251,7 +253,11 @@ async def download(session_id: str, x_api_key: str = Header(default="")):
 
     root = (SESSIONS_DIR / session_id).resolve()
     sessions_root = SESSIONS_DIR.resolve()
-    if not str(root).startswith(str(sessions_root) + os.sep):
+
+    # Ensure root is inside sessions_root using path semantics
+    try:
+        root.relative_to(sessions_root)
+    except ValueError:
         logger.warning("Rejected download path outside sessions root: %s", root)
         raise HTTPException(status_code=400, detail="Invalid session id")
 
