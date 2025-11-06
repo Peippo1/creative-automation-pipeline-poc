@@ -79,7 +79,7 @@ app = FastAPI(title="Creative Automation API", version="0.2.0")
 # Helpers
 # ------------------------------------------------------------
 LOCALE_RE = re.compile(r"^[a-z]{2}-[A-Z]{2}$")  # en-GB, de-DE
-SESSION_ID_RE = re.compile(r"^API_SESSION_[0-9a-f]{10}$")
+SESSION_ID_RE = re.compile(r"^API_SESSION_([0-9a-f]{10})$")
 ALLOWED_RATIOS = {"1:1", "9:16", "16:9"}
 RATIO_TO_FOLDER = {"1:1": "1x1", "9:16": "9x16", "16:9": "16x9"}
 MAX_LOCALES = 5
@@ -248,14 +248,16 @@ async def download(session_id: str, x_api_key: str = Header(default="")):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     # Strictly validate session id format and prevent path traversal
-    match = SESSION_ID_RE.match(session_id)
+    match = SESSION_ID_RE.fullmatch(session_id)
     if not match:
         raise HTTPException(status_code=400, detail="Invalid session id")
 
-    # Reconstruct a clean session_id to eliminate taint
-    safe_session_id = match.group(0)
-    root = (SESSIONS_DIR / safe_session_id).resolve()
+    # Rebuild a canonical, safe session id from the captured hex only
+    hex_part = match.group(1)
+    safe_session_id = f"API_SESSION_{hex_part}"
+
     sessions_root = SESSIONS_DIR.resolve()
+    root = (SESSIONS_DIR / safe_session_id).resolve()
 
     # Ensure root is inside sessions_root using path semantics
     try:
