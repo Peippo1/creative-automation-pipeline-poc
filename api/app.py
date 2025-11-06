@@ -257,6 +257,7 @@ async def download(session_id: str, x_api_key: str = Header(default="")):
     safe_session_id = f"API_SESSION_{hex_part}"
 
     sessions_root = SESSIONS_DIR.resolve()
+    # codeql[py/path-injection]: session_id is strictly validated by SESSION_ID_RE and constrained under SESSIONS_DIR
     root = (SESSIONS_DIR / safe_session_id).resolve()
 
     # Ensure root is inside sessions_root using path semantics
