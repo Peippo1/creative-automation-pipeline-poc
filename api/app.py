@@ -79,7 +79,9 @@ app = FastAPI(title="Creative Automation API", version="0.2.0")
 # Helpers
 # ------------------------------------------------------------
 LOCALE_RE = re.compile(r"^[a-z]{2}-[A-Z]{2}$")  # en-GB, de-DE
+SESSION_ID_RE = re.compile(r"^API_SESSION_[0-9a-f]{10}$")
 ALLOWED_RATIOS = {"1:1", "9:16", "16:9"}
+RATIO_TO_FOLDER = {"1:1": "1x1", "9:16": "9x16", "16:9": "16x9"}
 MAX_LOCALES = 5
 MAX_RATIOS = 3
 MAX_PROMPT_CHARS = 512
@@ -170,10 +172,10 @@ def generate_endpoint(payload: GenerateRequest, x_api_key: str = Header(default=
 
     for loc in payload.locales:
         for ratio in payload.ratios:
-            ratio_token = safe_name(ratio.replace(":", "x"))
-            locale_token = safe_name(loc)
-            filename = f"ad_{locale_token}_{uuid.uuid4().hex[:8]}.jpg"
-            out_path = outputs_root / ratio_token / filename
+            # Map whitelisted ratios to fixed folder names
+            ratio_folder = RATIO_TO_FOLDER[ratio]
+            filename = f"ad_{uuid.uuid4().hex[:8]}.jpg"
+            out_path = outputs_root / ratio_folder / filename
             out_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Ensure target path is within outputs_root
@@ -187,7 +189,7 @@ def generate_endpoint(payload: GenerateRequest, x_api_key: str = Header(default=
 
             # Compose and checks
             try:
-                composed = composer.compose_variant(
+                composer.compose_variant(
                     hero_path,
                     out_path,
                     payload.message,
@@ -209,9 +211,9 @@ def generate_endpoint(payload: GenerateRequest, x_api_key: str = Header(default=
                     detail="Failed to compose the ad image.",
                 )
 
-            # Preview (best-effort)
+            # Preview (best-effort): use the known-safe out_path
             try:
-                comp_path = Path(composed)
+                comp_path = out_path
                 with open(comp_path, "rb") as f:
                     b = f.read()
                 ext = comp_path.suffix.lower()
@@ -224,7 +226,7 @@ def generate_endpoint(payload: GenerateRequest, x_api_key: str = Header(default=
                 OutputItem(
                     locale=loc,
                     ratio=ratio,
-                    path=str(composed),
+                    path=str(out_path),
                     preview_b64=preview_b64,
                     logo_ok=logo_ok_bool,
                     legal_ok=legal_ok_bool,
@@ -243,7 +245,16 @@ async def download(session_id: str, x_api_key: str = Header(default="")):
     if not API_TOKEN or x_api_key != API_TOKEN:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
+    # Strictly validate session id format and prevent path traversal
+    if not SESSION_ID_RE.match(session_id):
+        raise HTTPException(status_code=400, detail="Invalid session id")
+
     root = (SESSIONS_DIR / session_id).resolve()
+    sessions_root = SESSIONS_DIR.resolve()
+    if not str(root).startswith(str(sessions_root) + os.sep):
+        logger.warning("Rejected download path outside sessions root: %s", root)
+        raise HTTPException(status_code=400, detail="Invalid session id")
+
     if not root.exists() or not root.is_dir():
         raise HTTPException(status_code=404, detail="Session not found")
 
