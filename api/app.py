@@ -274,8 +274,16 @@ async def download(session_id: str, x_api_key: str = Header(default="")):
     mem = io.BytesIO()
     with ZipFile(mem, mode="w", compression=ZIP_DEFLATED) as zf:
         for p in root.rglob("*"):
-            if p.is_file():
-                zf.write(p, arcname=p.relative_to(root))
+            # Do not follow symlinks or archive a file that resolves outside
+            # the validated session root.
+            if not p.is_file() or p.is_symlink():
+                continue
+            try:
+                p.resolve().relative_to(root)
+            except ValueError:
+                logger.warning("Skipped archive path outside session root: %s", p)
+                continue
+            zf.write(p, arcname=p.relative_to(root))
     mem.seek(0)
     return StreamingResponse(mem, media_type="application/zip", headers={
         "Content-Disposition": f"attachment; filename={session_id}.zip"
